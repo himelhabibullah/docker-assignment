@@ -82,7 +82,9 @@ jobs:
           image-ref: ${{ env.IMAGE_NAME }}:latest
           format: "table"
           exit-code: "1"
-          severity: "CRITICAL"
+          severity: "CRITICAL,HIGH"
+          scanners: "vuln"
+          vuln-type: "os"
 
       - name: Docker Hub Description
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
