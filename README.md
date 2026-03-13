@@ -49,10 +49,12 @@ Then open http://localhost:3000 in your browser.
 
 - **Base image:** `node:18-alpine` — a lightweight Node.js image (~50 MB).
 - **Working directory:** `/app` inside the container.
-- **Dependency install:** Copies `package.json` first and runs `npm install --production` to leverage Docker layer caching (dependencies are only reinstalled when `package.json` changes).
-- **Copy source code:** Copies `app.js` into the container.
+- **Non-root user:** Creates a dedicated `appuser` for security — the container never runs as root.
+- **Dependency install:** Uses `npm ci` for deterministic installs from the lockfile, then cleans the npm cache to reduce image size.
+- **Copy source code:** Copies `app.js` into the container with proper ownership.
 - **Expose port:** Declares port `3000` for the container.
-- **Startup command:** Runs `node app.js` when the container starts.
+- **Health check:** Built-in `HEALTHCHECK` instruction lets Docker monitor if the app is responding.
+- **Startup command:** Runs `node app.js` as the non-root user.
 
 ### Build the Docker Image
 
@@ -110,15 +112,58 @@ This workflow automates the Docker build and push process every time code is pus
 
 ### How It Works
 
-1. **Trigger:** Runs on every `push` or `pull_request` to the `main` branch.
-2. **Checkout:** Clones the repository code using `actions/checkout@v4`.
-3. **Docker Hub Login:** Authenticates to Docker Hub using stored repository secrets.
-4. **Build & Push:** Uses `docker/build-push-action@v5` to:
-   - Build the Docker image from the `Dockerfile`.
-   - Push the image with two tags:
-     - `latest` — always points to the most recent build.
-     - `<commit-sha>` — unique tag for traceability.
+The pipeline has **two jobs** that run sequentially:
+
+#### Job 1: Lint & Test
+
+1. **Checkout:** Clones the repository code.
+2. **Setup Node.js:** Installs Node.js 18 with npm caching for faster runs.
+3. **Install dependencies:** Runs `npm ci` for deterministic installs.
+4. **Run tests:** Executes tests if available — fails the pipeline early before building.
+
+#### Job 2: Build & Push Docker Image
+
+Only runs if Job 1 passes (`needs: lint-and-test`).
+
+1. **Checkout:** Clones the repository code.
+2. **Set up Docker Buildx:** Enables advanced Docker build features (multi-platform, caching).
+3. **Docker metadata:** Auto-generates smart image tags:
+   - `latest` — on pushes to `main`
+   - `<short-sha>` — short commit hash for traceability
+   - `v1.0.0`, `1.0` — semantic version tags when you push a git tag like `v1.0.0`
+   - `pr-<number>` — on pull requests
+4. **Docker Hub Login:** Authenticates using repository secrets (skipped on PRs).
+5. **Build & Push:** Uses `docker/build-push-action@v6` with:
+   - **Multi-platform builds:** `linux/amd64` and `linux/arm64` (Intel + Apple Silicon).
+   - **GitHub Actions cache:** Speeds up rebuilds by caching Docker layers.
+   - **Auto-generated tags and labels:** From the metadata step.
    - On pull requests, the image is **built only** (not pushed) to validate the Dockerfile.
+6. **Trivy security scan:** Scans the pushed image for CRITICAL and HIGH vulnerabilities — fails the pipeline if any are found.
+7. **Docker Hub description sync:** Automatically updates the Docker Hub repository description.
+
+### Production-Ready Features
+
+| Feature | Purpose |
+|---|---|
+| **Separate test job** | Fails fast before building if tests fail |
+| **Docker Buildx** | Enables multi-platform and advanced caching |
+| **Smart tagging (metadata-action)** | Auto-generates `latest`, SHA, and semver tags |
+| **Semantic versioning** | Push `v1.0.0` git tag → image tagged `1.0.0` and `1.0` |
+| **GitHub Actions layer cache** | Speeds up Docker rebuilds significantly |
+| **Multi-platform (amd64 + arm64)** | Works on Intel servers and Apple Silicon Macs |
+| **Trivy vulnerability scan** | Blocks deployment if critical CVEs are found |
+| **Docker Hub description sync** | Keeps Docker Hub repo description up to date |
+| **Minimal permissions** | `contents: read` follows least-privilege principle |
+| **Login only on push** | Skips Docker Hub auth on PRs (not needed) |
+
+### Dockerfile Production Features
+
+| Feature | Purpose |
+|---|---|
+| **Non-root user (`appuser`)** | Container never runs as root — security best practice |
+| **`npm ci`** | Deterministic installs from lockfile |
+| **Cache cleanup** | `npm cache clean` reduces final image size |
+| **HEALTHCHECK** | Docker auto-detects if the container is healthy |
 
 ### Required GitHub Secrets
 
@@ -128,6 +173,14 @@ Go to your GitHub repository → **Settings** → **Secrets and variables** → 
 |----------------------|-----------------------------------------------------------------------|
 | `DOCKERHUB_USERNAME` | Your Docker Hub username                                              |
 | `DOCKERHUB_TOKEN`    | A Docker Hub access token (create at Docker Hub → Account Settings → Security) |
+
+### Tagging Strategy
+
+| Trigger | Example Tags Generated |
+|---|---|
+| Push to `main` | `latest`, `a1b2c3d` |
+| Push tag `v1.2.3` | `1.2.3`, `1.2`, `a1b2c3d` |
+| Pull request #42 | `pr-42` (build only, no push) |
 
 ---
 
