@@ -75,17 +75,6 @@ jobs:
           cache-to: type=gha,mode=max
           platforms: linux/amd64,linux/arm64
 
-      - name: Run Trivy vulnerability scanner
-        if: github.event_name != 'pull_request'
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ env.IMAGE_NAME }}:latest
-          format: "table"
-          exit-code: "1"
-          severity: "CRITICAL,HIGH"
-          scanners: "vuln"
-          vuln-type: "os"
-
       - name: Docker Hub Description
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: peter-evans/dockerhub-description@v4

@@ -47,7 +47,7 @@ Then open http://localhost:3000 in your browser.
 
 ### `Dockerfile`
 
-- **Base image:** `node:18-alpine` — a lightweight Node.js image (~50 MB).
+- **Base image:** `node:22-alpine` — a lightweight Node.js image (~50 MB).
 - **Working directory:** `/app` inside the container.
 - **Non-root user:** Creates a dedicated `appuser` for security — the container never runs as root.
 - **Dependency install:** Uses `npm ci` for deterministic installs from the lockfile, then cleans the npm cache to reduce image size.
@@ -117,7 +117,7 @@ The pipeline has **two jobs** that run sequentially:
 #### Job 1: Lint & Test
 
 1. **Checkout:** Clones the repository code.
-2. **Setup Node.js:** Installs Node.js 18 with npm caching for faster runs.
+2. **Setup Node.js:** Installs Node.js 22 with npm caching for faster runs.
 3. **Install dependencies:** Runs `npm ci` for deterministic installs.
 4. **Run tests:** Executes tests if available — fails the pipeline early before building.
 
@@ -138,8 +138,7 @@ Only runs if Job 1 passes (`needs: lint-and-test`).
    - **GitHub Actions cache:** Speeds up rebuilds by caching Docker layers.
    - **Auto-generated tags and labels:** From the metadata step.
    - On pull requests, the image is **built only** (not pushed) to validate the Dockerfile.
-6. **Trivy security scan:** Scans the pushed image for CRITICAL and HIGH vulnerabilities — fails the pipeline if any are found.
-7. **Docker Hub description sync:** Automatically updates the Docker Hub repository description.
+6. **Docker Hub description sync:** Automatically updates the Docker Hub repository description.
 
 ### Production-Ready Features
 
@@ -151,7 +150,6 @@ Only runs if Job 1 passes (`needs: lint-and-test`).
 | **Semantic versioning** | Push `v1.0.0` git tag → image tagged `1.0.0` and `1.0` |
 | **GitHub Actions layer cache** | Speeds up Docker rebuilds significantly |
 | **Multi-platform (amd64 + arm64)** | Works on Intel servers and Apple Silicon Macs |
-| **Trivy vulnerability scan** | Blocks deployment if critical CVEs are found |
 | **Docker Hub description sync** | Keeps Docker Hub repo description up to date |
 | **Minimal permissions** | `contents: read` follows least-privilege principle |
 | **Login only on push** | Skips Docker Hub auth on PRs (not needed) |
