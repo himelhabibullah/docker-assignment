@@ -12,6 +12,8 @@ A simple Node.js application that returns the system hostname, containerized wit
 ├── package.json                    # Node.js dependencies
 ├── Dockerfile                      # Docker image definition
 ├── .dockerignore                   # Files excluded from Docker build
+├── docker-compose.yml              # Multi-container stack (3 app replicas + Nginx)
+├── nginx.conf                      # Nginx load balancer configuration
 └── .github/workflows/
     └── docker-publish.yml          # GitHub Actions CI/CD pipeline
 ```
@@ -182,11 +184,66 @@ Go to your GitHub repository → **Settings** → **Secrets and variables** → 
 
 ---
 
+## Step 5: Load Balancing with Docker Compose + Nginx
+
+Deploy three replicas of the containerized app behind an Nginx reverse proxy to demonstrate load balancing. The image is **pulled from Docker Hub** (`himeldocker/hostname-app:latest`) — no local build is used.
+
+### `docker-compose.yml`
+
+- **`app` service:** Runs 3 replicas of `himeldocker/hostname-app:latest` via `deploy.replicas: 3`. `pull_policy: always` guarantees the image is pulled fresh from Docker Hub on every `up`. Only `expose: "3000"` — the app is not directly reachable from the host.
+- **`nginx` service:** `nginx:1.27-alpine`, publishes port **8080** on the host, mounts `nginx.conf` read-only, and depends on `app`.
+
+### `nginx.conf`
+
+- **`resolver 127.0.0.11`:** Docker's embedded DNS. Required because `deploy.replicas` puts all replica IPs behind the single DNS name `app`, and Nginx needs to re-resolve it at runtime.
+- **`upstream hostname_app`:** Defines `app:3000` as the backend pool. Nginx defaults to **round-robin**, rotating requests across the three replicas.
+- **`proxy_pass`:** Forwards incoming requests to the upstream pool with standard `Host`, `X-Real-IP`, and `X-Forwarded-For` headers.
+
+### Run the Stack
+
+```bash
+docker compose up -d
+```
+
+Check the containers:
+
+```bash
+docker compose ps
+```
+
+You should see `app-1`, `app-2`, `app-3`, and `nginx-1` all running.
+
+### Verify Load Balancing
+
+```bash
+for i in {1..6}; do curl -s localhost:8080 ; echo; done
+```
+
+Expected output — the `hostname` field rotates across the three container IDs:
+
+```
+{"hostname":"89a167f592c7","message":"Hello from hostname-app!"}
+{"hostname":"6809863b46ad","message":"Hello from hostname-app!"}
+{"hostname":"0407e7cb742f","message":"Hello from hostname-app!"}
+{"hostname":"89a167f592c7","message":"Hello from hostname-app!"}
+{"hostname":"6809863b46ad","message":"Hello from hostname-app!"}
+{"hostname":"0407e7cb742f","message":"Hello from hostname-app!"}
+```
+
+### Tear Down
+
+```bash
+docker compose down
+```
+
+---
+
 ## Summary
 
-| Step | Action                        | Tool/Service    |
-|------|-------------------------------|-----------------|
-| 1    | Develop the application       | Node.js/Express |
-| 2    | Create a Docker image         | Docker          |
-| 3    | Push image to Docker Hub      | Docker CLI      |
-| 4    | Automate build and push       | GitHub Actions  |
+| Step | Action                          | Tool/Service            |
+|------|---------------------------------|-------------------------|
+| 1    | Develop the application         | Node.js/Express         |
+| 2    | Create a Docker image           | Docker                  |
+| 3    | Push image to Docker Hub        | Docker CLI              |
+| 4    | Automate build and push         | GitHub Actions          |
+| 5    | Load balance 3 replicas         | Docker Compose + Nginx  |

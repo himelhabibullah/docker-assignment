@@ -1,0 +1,19 @@
+services:
+  app:
+    image: himeldocker/hostname-app:latest
+    pull_policy: always
+    expose:
+      - "3000"
+    restart: unless-stopped
+    deploy:
+      replicas: 3
+
+  nginx:
+    image: nginx:1.27-alpine
+    depends_on:
+      - app
+    ports:
+      - "8080:80"
+    volumes:
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    restart: unless-stopped
