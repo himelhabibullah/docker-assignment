@@ -14,6 +14,16 @@ A simple Node.js application that returns the system hostname, containerized wit
 ├── .dockerignore                   # Files excluded from Docker build
 ├── docker-compose.yml              # Multi-container stack (3 app replicas + Nginx)
 ├── nginx.conf                      # Nginx load balancer configuration
+├── ansible/                        # Ansible automation for 4-VM deployment
+│   ├── ansible.cfg
+│   ├── inventory.ini               # app_servers + proxies groups
+│   ├── playbooks/
+│   │   ├── 10-docker.yml           # Install Docker on all VMs
+│   │   ├── 20-deploy-app.yml       # Deploy app container on 3 app VMs
+│   │   ├── 30-nginx.yml            # Run Nginx reverse proxy on proxy VM
+│   │   └── site.yml                # Master playbook
+│   ├── templates/nginx.conf.j2     # Nginx config (upstream from inventory)
+│   └── SETUP_RUNNER.md             # Self-hosted runner setup guide
 └── .github/workflows/
     └── docker-publish.yml          # GitHub Actions CI/CD pipeline
 ```
@@ -30,9 +40,11 @@ A simple Node.js application that returns the system hostname, containerized wit
   ```json
   {
     "hostname": "your-machine-name",
+    "commit": "4aa1fc3...",
     "message": "Hello from hostname-app!"
   }
   ```
+- The `commit` field is read from the `COMMIT_HASH` env var, which is baked into the image at build time via a Docker `ARG` (the CI pipeline passes `github.sha` as the build-arg).
 
 ### Run Locally
 
@@ -238,6 +250,104 @@ docker compose down
 
 ---
 
+## Step 6: Multi-VM Deployment with Multipass + Ansible
+
+Step 5 runs everything on a single host. Step 6 targets the assignment's real
+topology: **3 app VMs behind a 4th reverse-proxy VM**, all provisioned and
+configured by Ansible. This replaces `docker-compose` for the production-style
+deployment.
+
+### 6.1 Provision the VMs (Multipass)
+
+Install Multipass (`brew install --cask multipass` on macOS), then launch four
+Ubuntu 24.04 VMs:
+
+```bash
+for vm in app1 app2 app3 proxy; do
+  multipass launch 24.04 --name $vm --cpus 1 --memory 1G --disk 5G
+done
+multipass list        # note each VM's IP
+```
+
+> **Note on `192.168.123.0/24`:** the assignment brief specifies that subnet,
+> but Multipass on macOS uses its own `192.168.64.0/24` bridge by default.
+> Switching requires reconfiguring the host bridge (system-level change), so
+> this project adapts to whatever IPs Multipass assigns — functionally
+> identical. Update `ansible/inventory.ini` with the IPs from `multipass list`.
+
+### 6.2 Grant Ansible SSH access
+
+Inject your SSH public key into each VM's `ubuntu` user:
+
+```bash
+PUB_KEY=$(cat ~/.ssh/id_ed25519.pub)
+for vm in app1 app2 app3 proxy; do
+  multipass exec $vm -- bash -c "mkdir -p ~/.ssh && echo '$PUB_KEY' >> ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys"
+done
+```
+
+Smoke-test with `ansible all -m ping` from the `ansible/` directory.
+
+### 6.3 The Ansible playbooks
+
+| Playbook                    | Target        | What it does                                                                 |
+|-----------------------------|---------------|------------------------------------------------------------------------------|
+| `10-docker.yml`             | all 4 VMs     | Adds Docker's apt repo + GPG key, installs `docker-ce` + Compose plugin, enables the service, adds `ubuntu` to the `docker` group. |
+| `20-deploy-app.yml`         | `app_servers` | Pulls `himeldocker/hostname-app:latest` and runs it as a container on each app VM (`hostname` set to the VM name, port `3000:3000`). |
+| `30-nginx.yml`              | `proxies`     | Renders `nginx.conf` from a Jinja2 template (upstream block auto-populated from the `app_servers` group) and runs `nginx:1.27-alpine` in a container on port 80. |
+| `site.yml`                  | —             | Master playbook — imports the three above in order.                          |
+
+Run everything:
+
+```bash
+cd ansible
+ansible-playbook playbooks/site.yml
+```
+
+### 6.4 Continuous Delivery (CD)
+
+The workflow has a third job, `deploy`, that runs after `build-and-push` on
+every push to `main`:
+
+- `runs-on: [self-hosted, proxy]` — a **self-hosted GitHub runner** installed
+  on the proxy VM (GitHub's public runners cannot reach the private Multipass
+  LAN).
+- Checks out the repo and runs:
+  ```bash
+  ansible-playbook playbooks/20-deploy-app.yml \
+    -e docker_image=<dockerhub-user>/hostname-app:latest
+  ```
+
+One-time runner setup instructions live in `ansible/SETUP_RUNNER.md`.
+
+### 6.5 Testing via `myapp.com`
+
+Add an `/etc/hosts` entry on the host pointing `myapp.com` at the proxy VM:
+
+```bash
+echo "<proxy-vm-ip> myapp.com" | sudo tee -a /etc/hosts
+```
+
+Verify round-robin load balancing across the three app VMs:
+
+```bash
+for i in {1..6}; do curl -s http://myapp.com/ ; echo; done
+```
+
+Expected — `hostname` rotates `app1 → app2 → app3` and `commit` holds the
+deployed Git SHA:
+
+```
+{"hostname":"app1","commit":"4aa1fc3...","message":"Hello from hostname-app!"}
+{"hostname":"app2","commit":"4aa1fc3...","message":"Hello from hostname-app!"}
+{"hostname":"app3","commit":"4aa1fc3...","message":"Hello from hostname-app!"}
+{"hostname":"app1","commit":"4aa1fc3...","message":"Hello from hostname-app!"}
+{"hostname":"app2","commit":"4aa1fc3...","message":"Hello from hostname-app!"}
+{"hostname":"app3","commit":"4aa1fc3...","message":"Hello from hostname-app!"}
+```
+
+---
+
 ## Summary
 
 | Step | Action                          | Tool/Service            |
@@ -246,4 +356,6 @@ docker compose down
 | 2    | Create a Docker image           | Docker                  |
 | 3    | Push image to Docker Hub        | Docker CLI              |
 | 4    | Automate build and push         | GitHub Actions          |
-| 5    | Load balance 3 replicas         | Docker Compose + Nginx  |
+| 5    | Load balance 3 replicas (dev)   | Docker Compose + Nginx  |
+| 6    | Multi-VM deployment             | Multipass + Ansible     |
+| 7    | Continuous delivery             | Self-hosted GitHub runner |
