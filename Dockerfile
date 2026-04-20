@@ -12,6 +12,10 @@ RUN npm ci --production && npm cache clean --force
 # Copy application code
 COPY app.js ./
 
+# Bake the git commit hash into the image
+ARG COMMIT_HASH=unknown
+ENV COMMIT_HASH=$COMMIT_HASH
+
 # Set proper ownership
 RUN chown -R appuser:appgroup /app
 

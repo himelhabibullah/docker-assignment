@@ -1,0 +1,27 @@
+---
+- name: Deploy hostname-app container on app servers
+  hosts: app_servers
+  become: true
+  vars:
+    image: "{{ docker_image | default('himeldocker/hostname-app:latest') }}"
+    container_name: hostname-app
+    host_port: 3000
+    container_port: 3000
+  tasks:
+    - name: Pull latest image
+      community.docker.docker_image:
+        name: "{{ image }}"
+        source: pull
+        force_source: true
+
+    - name: Run hostname-app container
+      community.docker.docker_container:
+        name: "{{ container_name }}"
+        image: "{{ image }}"
+        state: started
+        restart_policy: unless-stopped
+        recreate: true
+        pull: true
+        ports:
+          - "{{ host_port }}:{{ container_port }}"
+        hostname: "{{ inventory_hostname }}"

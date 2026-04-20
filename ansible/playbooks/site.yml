@@ -1,0 +1,7 @@
+---
+# Master playbook — runs full setup in order.
+# Usage:
+#   ansible-playbook playbooks/site.yml
+- import_playbook: 10-docker.yml
+- import_playbook: 20-deploy-app.yml
+- import_playbook: 30-nginx.yml

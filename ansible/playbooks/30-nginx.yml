@@ -1,0 +1,38 @@
+---
+- name: Configure Nginx reverse proxy (in Docker) on proxy VM
+  hosts: proxies
+  become: true
+  vars:
+    nginx_image: "nginx:1.27-alpine"
+    nginx_conf_dst: /etc/nginx/nginx.conf
+    container_name: nginx-proxy
+  tasks:
+    - name: Ensure nginx config directory exists on host
+      ansible.builtin.file:
+        path: /etc/nginx
+        state: directory
+        mode: "0755"
+
+    - name: Render nginx.conf from template
+      ansible.builtin.template:
+        src: ../templates/nginx.conf.j2
+        dest: "{{ nginx_conf_dst }}"
+        mode: "0644"
+      register: nginx_conf
+
+    - name: Pull nginx image
+      community.docker.docker_image:
+        name: "{{ nginx_image }}"
+        source: pull
+
+    - name: Run nginx container
+      community.docker.docker_container:
+        name: "{{ container_name }}"
+        image: "{{ nginx_image }}"
+        state: started
+        restart_policy: unless-stopped
+        recreate: "{{ nginx_conf.changed }}"
+        ports:
+          - "80:80"
+        volumes:
+          - "{{ nginx_conf_dst }}:/etc/nginx/nginx.conf:ro"

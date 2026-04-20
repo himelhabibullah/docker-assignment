@@ -7,6 +7,7 @@ const PORT = process.env.PORT || 3000;
 app.get("/", (req, res) => {
   res.json({
     hostname: os.hostname(),
+    commit: process.env.COMMIT_HASH || "unknown",
     message: "Hello from hostname-app!",
   });
 });

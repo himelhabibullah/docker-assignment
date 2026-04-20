@@ -71,6 +71,8 @@ jobs:
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          build-args: |
+            COMMIT_HASH=${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
           platforms: linux/amd64,linux/arm64
@@ -83,3 +85,18 @@ jobs:
           password: ${{ secrets.DOCKERHUB_TOKEN }}
           repository: ${{ env.IMAGE_NAME }}
           short-description: "Node.js app that returns system hostname"
+
+  deploy:
+    name: Deploy to VMs via Ansible
+    runs-on: [self-hosted, proxy]
+    needs: build-and-push
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Ansible deploy playbook
+        working-directory: ansible
+        run: |
+          ansible-playbook playbooks/20-deploy-app.yml \
+            -e docker_image=${{ env.IMAGE_NAME }}:latest
